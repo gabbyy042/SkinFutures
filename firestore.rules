@@ -1,0 +1,58 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function validString(value, maxLen) {
+      return value is string && value.size() <= maxLen;
+    }
+
+    function validLifestyleData(data) {
+      return data.keys().hasAll(['sunExposure', 'sleepQuality', 'stressLevel', 'skincareConsistency'])
+        && data.sunExposure in ['low', 'medium', 'high']
+        && data.sleepQuality in ['poor', 'fair', 'good']
+        && data.stressLevel in ['low', 'medium', 'high']
+        && data.skincareConsistency in ['rarely', 'sometimes', 'daily'];
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) 
+        && request.resource.data.keys().hasAll(['createdAt'])
+        && request.resource.data.createdAt == request.time;
+      allow update: if isOwner(userId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['imageUrl', 'lifestyle', 'baseline', 'updatedAt']);
+      allow delete: if isOwner(userId);
+    }
+
+    // User routines
+    match /routines/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if isOwner(userId)
+        && request.resource.data.steps is list
+        && request.resource.data.steps.size() <= 10;
+    }
+
+    // User progress logs
+    match /progress/{userId}/logs/{logId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && request.resource.data.date is timestamp
+        && request.resource.data.date <= request.time;
+      allow update, delete: if false; // Logs are immutable
+    }
+
+    // Deny all other access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
